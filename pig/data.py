@@ -154,7 +154,7 @@ class PeppaPigDataset(Dataset):
     @classmethod
     def load(cls, directory):
         return PeppaPigDataset(force_cache=False, cache_dir=directory)
-    
+
 class PeppaPigIterableDataset(IterableDataset):
     def __init__(self,
                  split=['val'],
@@ -187,6 +187,8 @@ class PeppaPigIterableDataset(IterableDataset):
         paths = [ path for split in self.split \
                        for episode_id in self.split_spec[self.fragment_type][split] \
                        for path in glob.glob(f"data/out/{width}x{height}/{self.fragment_type}/{episode_id}/*.avi") ]
+        random.shuffle(paths)
+
         # Split data between workers
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:  # single-process data loading, return the full iterator
@@ -272,7 +274,7 @@ class PigData(pl.LightningDataModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.loader_args = ['batch_size', 'shuffle']
+        self.loader_args = ['batch_size']
         if self.config['iterable']:
             self.Dataset = lambda *args, **kwargs: PeppaPigIterableDataset(*args, **kwargs)
         else:
@@ -313,12 +315,12 @@ class PigData(pl.LightningDataModule):
                                         fragment_type='narration',
                                         duration=self.config['val']['duration'],
                                         jitter=self.config['val']['jitter'])
-            
+
 
     def train_dataloader(self):
         return DataLoader(self.train, collate_fn=collate, num_workers=self.config['num_workers'],
                           batch_size=self.config['train']['batch_size'],
-                          shuffle=self.config['train']['shuffle'])
+                          shuffle=False if self.config['iterable'] else True)
 
     def val_dataloader(self):
         
