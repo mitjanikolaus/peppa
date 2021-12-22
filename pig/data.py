@@ -172,6 +172,14 @@ class PeppaPigIterableDataset(IterableDataset):
         self.jitter = jitter
         self.split_spec = SPLIT_SPEC
 
+        width,  height = self.target_size
+        self.paths = [path for split in self.split \
+            for episode_id in self.split_spec[self.fragment_type][split] \
+            for path in glob.glob(f"data/out/{width}x{height}/{self.fragment_type}/{episode_id}/*.avi")]
+
+    def shuffle(self):
+        random.shuffle(self.paths)
+
     def featurize(self, clip):
         return featurize(clip)
         
@@ -183,24 +191,18 @@ class PeppaPigIterableDataset(IterableDataset):
                 logging.warning(f"{e}")
 
     def _raw_clips(self):
-        width,  height = self.target_size
-        paths = [ path for split in self.split \
-                       for episode_id in self.split_spec[self.fragment_type][split] \
-                       for path in glob.glob(f"data/out/{width}x{height}/{self.fragment_type}/{episode_id}/*.avi") ]
-        random.shuffle(paths)
-
         # Split data between workers
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:  # single-process data loading, return the full iterator
             first = 0
-            last = len(paths)
+            last = len(self.paths)
         else:
-            per_worker = int(math.ceil(len(paths) / float(worker_info.num_workers)))
+            per_worker = int(math.ceil(len(self.paths) / float(worker_info.num_workers)))
             worker_id = worker_info.id
             first = worker_id * per_worker
-            last = min(first + per_worker, len(paths))
+            last = min(first + per_worker, len(self.paths))
             logging.info(f"Workerid: {worker_id}; [{first}:{last}]")
-        for path in paths[first:last]:
+        for path in self.paths[first:last]:
             with m.VideoFileClip(path) as video:
             #logging.info(f"Path: {path}, size: {video.size}")
                 if self.duration is None:
@@ -318,6 +320,9 @@ class PigData(pl.LightningDataModule):
 
 
     def train_dataloader(self):
+        if isinstance(self.train, PeppaPigIterableDataset):
+            logging.info("Re-shuffling iterable train dataset")
+            self.train.shuffle()
         return DataLoader(self.train, collate_fn=collate, num_workers=self.config['num_workers'],
                           batch_size=self.config['train']['batch_size'],
                           shuffle=False if self.config['iterable'] else True)
