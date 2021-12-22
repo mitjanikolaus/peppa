@@ -211,6 +211,7 @@ class PeppaPigIterableDataset(IterableDataset):
                     clips = pig.preprocess.lines(video, meta)
                 else:
                     clips = pig.preprocess.segment(video, duration=self.duration, jitter=self.jitter)
+                random.shuffle(clips)
                 for clip in clips:
                     yield clip
                                        
