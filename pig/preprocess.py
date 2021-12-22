@@ -95,32 +95,29 @@ def segment(clip, duration=3.2, jitter=False):
     if jitter:
         yield from segment_jitter(clip, duration=duration)
     else:
-        start = 0
-        end = start + duration
-        while end <= clip.duration:
+        start_times = [n*duration for n in range(int(clip.duration/duration))]
+        random.shuffle(start_times)
+        for start in start_times:
+            end = start + duration
             sub = clip.subclip(start, end)
             sub.offset = start
-            start = end
-            end   = end + duration
             yield sub
 
+
 def segment_jitter(clip, duration=3.2):
-    logging.info(f"Jittering around duration {duration}") 
-    start = 0
-    end = start + duration
-    while end <= clip.duration:
+    logging.info(f"Segmenting with jitter around duration {duration}")
+
+    mid_times = [n * duration + duration/2 for n in range(int(clip.duration / duration))]
+    random.shuffle(mid_times)
+    for mid in mid_times:
         size_a = min(6.0, max(0.05, duration + random.normalvariate(0.0, 1.0)))
         size_v = min(6.0, max(0.05, duration + random.normalvariate(0.0, 1.0)))
-        mid = end - (end - start) / 2
-        start_a = max(0, mid - (size_a/2))
-        end_a   = min(clip.duration, mid + (size_a/2))
-        start_v = max(0, mid - (size_v/2))
-        end_v   = min(clip.duration, mid + (size_v/2))
+        start_a = max(0.0, mid - (size_a / 2))
+        end_a = min(clip.duration, mid + (size_a / 2))
+        start_v = max(0.0, mid - (size_v / 2))
+        end_v = min(clip.duration, mid + (size_v / 2))
+
         sub_a = clip.audio.subclip(start_a, end_a)
         sub = clip.subclip(start_v, end_v)
         sub.audio = sub_a
         yield sub
-        start = end
-        end = end + duration
-
-        
