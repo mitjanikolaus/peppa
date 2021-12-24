@@ -10,7 +10,7 @@ import pig.preprocess
 import moviepy.editor as m
 import pytorch_lightning as pl
 import logging
-from itertools import groupby
+from itertools import groupby, islice
 import pig.util
 from pig.triplet import PeppaTripletDataset, collate_triplets
 import json
@@ -194,15 +194,10 @@ class PeppaPigIterableDataset(IterableDataset):
         # Split data between workers
         worker_info = torch.utils.data.get_worker_info()
         if worker_info is None:  # single-process data loading, return the full iterator
-            first = 0
-            last = len(self.paths)
+            paths_worker = self.paths
         else:
-            per_worker = int(math.ceil(len(self.paths) / float(worker_info.num_workers)))
-            worker_id = worker_info.id
-            first = worker_id * per_worker
-            last = min(first + per_worker, len(self.paths))
-            logging.info(f"Workerid: {worker_id}; [{first}:{last}]")
-        for path in self.paths[first:last]:
+            paths_worker = islice(self.paths, worker_info.id, None, worker_info.num_workers)
+        for path in paths_worker:
             with m.VideoFileClip(path) as video:
             #logging.info(f"Path: {path}, size: {video.size}")
                 if self.duration is None:
