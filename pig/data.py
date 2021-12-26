@@ -320,7 +320,7 @@ class PigData(pl.LightningDataModule):
             self.train.shuffle()
         return DataLoader(self.train, collate_fn=collate, num_workers=self.config['num_workers'],
                           batch_size=self.config['train']['batch_size'],
-                          shuffle=False if self.config['iterable'] else True)
+                          shuffle=False if self.config['iterable'] else self.config['train']['shuffle'])
 
     def val_dataloader(self):
         
