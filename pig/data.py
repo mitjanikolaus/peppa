@@ -271,7 +271,7 @@ class PigData(pl.LightningDataModule):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.loader_args = ['batch_size']
+        self.loader_args = ['batch_size', 'shuffle']
         if self.config['iterable']:
             self.Dataset = lambda *args, **kwargs: PeppaPigIterableDataset(*args, **kwargs)
         else:
