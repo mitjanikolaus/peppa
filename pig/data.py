@@ -162,6 +162,7 @@ class PeppaPigIterableDataset(IterableDataset):
                  fragment_type='dialog',
                  duration=3.2,
                  jitter=False,
+                 av_shift=False,
                  ):
         if type(split) is str:
             raise ValueError("`split` should be a list of strings")
@@ -170,6 +171,7 @@ class PeppaPigIterableDataset(IterableDataset):
         self.fragment_type = fragment_type
         self.duration = duration
         self.jitter = jitter
+        self.av_shift = av_shift
         self.split_spec = SPLIT_SPEC
 
         width,  height = self.target_size
@@ -205,7 +207,7 @@ class PeppaPigIterableDataset(IterableDataset):
                     meta = json.load(open(f"{os.path.dirname(path)}/{i}.json"))
                     clips = pig.preprocess.lines(video, meta)
                 else:
-                    clips = pig.preprocess.segment(video, duration=self.duration, jitter=self.jitter)
+                    clips = pig.preprocess.segment(video, duration=self.duration, jitter=self.jitter, av_shift=self.av_shift)
                 for clip in clips:
                     yield clip
                                        
