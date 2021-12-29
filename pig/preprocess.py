@@ -88,12 +88,16 @@ def extract_realines(target_size=(180, 100)):
                         filename = os.path.splitext(meta['path'])[0]
                         clip.subclip(start, end).resize(target_size).write_videofile(f"{filename}.mp4",
                                                                                      fps=10,
-                                                                                     codec="mpeg4")                           
-    
-    
-def segment(clip, duration=3.2, jitter=False):
+                                                                                     codec="mpeg4")
+
+
+def segment(clip, duration=3.2, jitter=False, av_shift=False):
+    if jitter and av_shift:
+        raise NotImplementedError("Jitter together with av_shift currently not implemented")
     if jitter:
         yield from segment_jitter(clip, duration=duration)
+    elif av_shift:
+        yield from segment_av_shift(clip, duration=duration)
     else:
         start_times = [n*duration for n in range(int(clip.duration/duration))]
         random.shuffle(start_times)
@@ -102,6 +106,25 @@ def segment(clip, duration=3.2, jitter=False):
             sub = clip.subclip(start, end)
             sub.offset = start
             yield sub
+
+
+def segment_av_shift(clip, duration=3.2):
+    logging.info(f"Segmenting with shift around duration {duration}")
+
+    mid_times = [n * duration + duration/2 for n in range(int(clip.duration / duration))]
+    random.shuffle(mid_times)
+    for mid in mid_times:
+        offset_a = min(duration/2, max(-duration/2, random.normalvariate(0.0, 1.0)))
+        offset_v = min(duration/2, max(-duration/2, random.normalvariate(0.0, 1.0)))
+        start_a = max(0.0, mid + offset_a - (duration / 2))
+        end_a = min(clip.duration, mid + offset_a + (duration / 2))
+        start_v = max(0.0, mid + offset_v - (duration / 2))
+        end_v = min(clip.duration, mid + offset_v + (duration / 2))
+
+        sub_a = clip.audio.subclip(start_a, end_a)
+        sub = clip.subclip(start_v, end_v)
+        sub.audio = sub_a
+        yield sub
 
 
 def segment_jitter(clip, duration=3.2):
