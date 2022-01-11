@@ -162,8 +162,6 @@ class PeppaPig(pl.LightningModule):
         self.video_encoder = R3DEncoder(**self.config['video'])
         self.audio_encoder = Wav2VecEncoder(**config['audio'])
 
-        self.divide_batch_size_and_accumulate_results = self.config["divide_batch_size_and_accumulate_results"]
-
     def forward(self, batch):
         # in lightning, forward defines the prediction/inference actions
         try:
@@ -186,17 +184,14 @@ class PeppaPig(pl.LightningModule):
         # training_step defined the train loop.
         # It is independent of forward
 
-        batch_video_parts = torch.split(batch.video, self.divide_batch_size_and_accumulate_results, dim=0)
-        batch_audio_parts = torch.split(batch.audio, self.divide_batch_size_and_accumulate_results, dim=0)
+        V = self.encode_video(batch.video)
+        A = self.encode_audio(batch.audio)
 
-        video_result_parts = []
-        audio_result_parts = []
+        return {"pred": (A, V)}
 
-        for batch_video, batch_audio in zip(batch_video_parts, batch_audio_parts):
-            V = self.encode_video(batch_video)
-            A = self.encode_audio(batch_audio)
-            audio_result_parts.append(A)
-            video_result_parts.append(V)
+    def training_step_end(self, training_step_outputs):
+        audio_result_parts = [output["pred"][0] for output in training_step_outputs]
+        video_result_parts = [output["pred"][1] for output in training_step_outputs]
 
         accumulated_A = torch.cat(audio_result_parts, dim=0)
         accumulated_V = torch.cat(video_result_parts, dim=0)
