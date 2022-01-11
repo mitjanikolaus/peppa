@@ -161,6 +161,9 @@ class PeppaPig(pl.LightningModule):
         self.loss = TripletLoss(margin=self.config['margin'])
         self.video_encoder = R3DEncoder(**self.config['video'])
         self.audio_encoder = Wav2VecEncoder(**config['audio'])
+
+        self.accumulate_batches_for_loss_calculation = self.config["accumulate_batches_for_loss_calculation"]
+        self.forward_pass_cache = {"A": [], "V": []}
         
     def forward(self, batch):
         # in lightning, forward defines the prediction/inference actions
@@ -183,13 +186,26 @@ class PeppaPig(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         # training_step defined the train loop.
         # It is independent of forward
-        
+
+        idx = batch_idx % self.accumulate_batches_for_loss_calculation
         V = self.encode_video(batch.video)
         A = self.encode_audio(batch.audio)
-        loss = self.loss(V, A)
-        # Logging to TensorBoard by default
-        self.log("train_loss", loss.item(), prog_bar=True)
-        return loss
+        self.forward_pass_cache["A"].append(A)
+        self.forward_pass_cache["V"].append(V)
+
+        if idx == self.accumulate_batches_for_loss_calculation-1:
+            accumulated_A = torch.cat(self.forward_pass_cache["A"], dim=0)
+            accumulated_V = torch.cat(self.forward_pass_cache["V"], dim=0)
+
+            loss = self.loss(accumulated_V, accumulated_A)
+            # Logging to TensorBoard by default
+            self.log("train_loss", loss.item(), prog_bar=True)
+
+            self.forward_pass_cache = {"A": [], "V": []}
+            return loss
+        else:
+            # Do not calculate the loss yet
+            return None
 
     def validation_step(self, batch, batch_idx, dataloader_idx=None):
         if dataloader_idx == 0:

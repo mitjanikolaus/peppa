@@ -8,6 +8,7 @@ import yaml
 
 
 default_config = {'margin': 0.2,
+                  'accumulate_batches_for_loss_calculation': 1,
                    'data': {'num_workers': 12,
                             'extract': False,
                             'prepare': False,
