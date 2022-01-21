@@ -7,7 +7,7 @@ import pandas as pd
 import random
 import os.path
 
-def extract(target_size=(180, 100)):
+def extract(fps, target_size=(180, 100)):
     logging.basicConfig(level=logging.INFO)
     os.makedirs("data/out/dialog", exist_ok=True)
     os.makedirs("data/out/narration", exist_ok=True)
@@ -18,13 +18,13 @@ def extract(target_size=(180, 100)):
     for path in episodes:
         annotation = json.load(open(path))
         with m.VideoFileClip(titles[annotation['title']]) as video:
-            extract_from_episode(annotation, video, target_size=target_size)
+            extract_from_episode(annotation, video, target_size=target_size, fps=fps)
             video.close()
         
 
 
     
-def extract_from_episode(annotation, video, target_size):
+def extract_from_episode(annotation, video, target_size, fps):
     width, height = target_size
     narrations = []
     narrations_meta = []
@@ -45,7 +45,7 @@ def extract_from_episode(annotation, video, target_size):
         
         logging.info(f"Writing dialog {i} from episode {annotation['id']}") 
         clip.resize(target_size).write_videofile(f"data/out/{width}x{height}/dialog/{annotation['id']}/{i}.avi",
-                                         fps=10,
+                                         fps=fps,
                                          codec='mpeg4')
         logging.info(f"Writing dialog {i} from episode {annotation['id']}") 
         json.dump(dialogs_meta[i], open(f"data/out/{width}x{height}/dialog/{annotation['id']}/{i}.json", 'w'))
@@ -53,7 +53,7 @@ def extract_from_episode(annotation, video, target_size):
         
         logging.info(f"Writing narration {i} from episode {annotation['id']}") 
         clip.resize(target_size).write_videofile(f"data/out/{width}x{height}/narration/{annotation['id']}/{i}.avi",
-                                         fps=10,
+                                         fps=fps,
                                          codec='mpeg4')
         logging.info(f"Writing narration metadata {i} from episode {annotation['id']}") 
         json.dump(narrations_meta[i], open(f"data/out/{width}x{height}/narration/{annotation['id']}/{i}.json", 'w'))
@@ -73,7 +73,7 @@ def lines(clip, metadata):
         else:
             logging.warning(f"Line {line} starts past end of clip {clip.filename}")
             
-def extract_realines(target_size=(180, 100)):
+def extract_realines(fps, target_size=(180, 100)):
     from pig.triplet import grouped
     for fragment_type in ['dialog', 'narration']:
         items = [ {**json.load(open(path)), **{'path': path }}
@@ -87,7 +87,7 @@ def extract_realines(target_size=(180, 100)):
                         end = fully[-1]['end'] + meta['clipStart']
                         filename = os.path.splitext(meta['path'])[0]
                         clip.subclip(start, end).resize(target_size).write_videofile(f"{filename}.mp4",
-                                                                                     fps=10,
+                                                                                     fps=fps,
                                                                                      codec="mpeg4")                           
     
     

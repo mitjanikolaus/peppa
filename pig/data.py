@@ -305,7 +305,7 @@ class PigData(pl.LightningDataModule):
     def prepare_data(self):
         if self.config['extract']:
             logging.info(f"Extracting data for target size {self.config['target_size']}")
-            pig.preprocess.extract(self.config['target_size'])
+            pig.preprocess.extract(self.config['fps'], self.config['target_size'])
         if self.config['prepare']:    
             logging.info("Collecting stats on training data.")
             
