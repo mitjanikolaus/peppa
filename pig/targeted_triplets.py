@@ -95,7 +95,7 @@ class PeppaTargetedTripletDataset(Dataset):
 
     def __getitem__(self, idx):
         target_info, distractor_info = self._sample[idx]
-        with m.VideoFileClip(target_info['path']) as target:
+        with m.VideoFileClip(target_info['path'], audio_fps=self.audio_sample_rate) as target:
             with m.VideoFileClip(distractor_info['path']) as distractor:
                 positive = featurize(target, self.audio_sample_rate)
                 negative = featurize(distractor, self.audio_sample_rate)

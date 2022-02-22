@@ -287,7 +287,7 @@ class PeppaPigIterableDataset(IterableDataset):
             last = min(first + per_worker, len(paths))
             logging.info(f"Workerid: {worker_id}; [{first}:{last}]")
         for path in paths[first:last]:
-            with m.VideoFileClip(path) as video:
+            with m.VideoFileClip(path, audio_fps=self.audio_sample_rate) as video:
             #logging.info(f"Path: {path}, size: {video.size}")
                 if self.duration is None:
                     i = os.path.splitext(os.path.basename(path))[0]
