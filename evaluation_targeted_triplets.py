@@ -31,26 +31,29 @@ NUM_WORKERS = 8
 RESULT_DIR = "results/targeted_triplets"
 
 
-def evaluate(model, version):
+def evaluate(model):
     """Compute the targeted triplets score for the given model. """
     gpus = None
     if torch.cuda.is_available():
         gpus = 1
     trainer = pl.Trainer(logger=False, gpus=gpus)
+
+    results_all = []
     for fragment_type in FRAGMENTS:
-        row = dict(
-                fragment_type=fragment_type,
-                version=version,
-                hparams_path=f"lightning_logs/version_{version}/hparams.yaml"
-        )
+        # row = dict(
+        #         fragment_type=fragment_type,
+        #         version=version,
+        #         hparams_path=f"lightning_logs/version_{version}/hparams.yaml"
+        # )
         for pos in POS_TAGS:
             per_sample_results = targeted_triplet_score(fragment_type, pos, model, trainer)
-            result_bootstrapped = list(get_bootstrapped_scores(per_sample_results))
-            acc_mean, acc_std = np.mean(result_bootstrapped), np.std(result_bootstrapped)
-            row.update({
-                f"targeted_triplet_{pos}_acc": acc_mean,
-                f"targeted_triplet_{pos}_acc_std": acc_std,
-            })
+            print(f"Mean acc: {np.mean(per_sample_results)}")
+            # result_bootstrapped = list(get_bootstrapped_scores(per_sample_results))
+            # acc_mean, acc_std = np.mean(result_bootstrapped), np.std(result_bootstrapped)
+            # row.update({
+            #     f"targeted_triplet_{pos}_acc": acc_mean,
+            #     f"targeted_triplet_{pos}_acc_std": acc_std,
+            # })
 
             # Save per-sample results for detailed analysis
             results_data = get_eval_set_info(fragment_type, pos)
@@ -60,12 +63,10 @@ def evaluate(model, version):
                 f"eval set CSV file: ({len(results_data)})"
 
             results_data["result"] = per_sample_results
-            path = f"{RESULT_DIR}/version_{version}/targeted_triplets_{fragment_type}_{pos}.csv"
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            results_data.to_csv(path)
+            results_all.append(results_data)
 
-        print(row)
-        yield row
+    results_all = pd.concat(results_all, ignore_index=True)
+    return results_all
 
 
 def targeted_triplet_score(fragment_type, pos, model, trainer):
@@ -281,8 +282,11 @@ def get_args():
     return parser.parse_args()
 
 
-def create_results_table():
-    data = torch.load(f"{RESULT_DIR}/minimal_pairs_scores.pt")
+def create_results_table(versions):
+    for version in versions:
+        result_path = f"{RESULT_DIR}/version_{version}/minimal_pairs_scores.csv"
+        pd.read_csv(result_path)
+
     data = add_condition(data)
     data = pd.DataFrame.from_records(data)
     data['pretraining'] = pd.Categorical(data.apply(pretraining, axis=1),
@@ -314,15 +318,16 @@ if __name__ == "__main__":
     args = get_args()
 
     os.makedirs(RESULT_DIR, exist_ok=True)
-    rows = []
     for version in args.versions:
         logging.info(f"Evaluating version {version}")
 
         if not args.plot_only:
             net, path = load_best_model(f"lightning_logs/version_{version}/")
 
-            result_rows = evaluate(net, version)
-            rows.extend(result_rows)
+            result = evaluate(net)
+            result_path = f"{RESULT_DIR}/version_{version}/minimal_pairs_scores.csv"
+            os.makedirs(os.path.dirname(result_path), exist_ok=True)
+            result.to_csv(result_path)
 
         get_average_result_bootstrapping(version)
         create_per_word_result_plots(version, args.min_samples)
@@ -330,7 +335,4 @@ if __name__ == "__main__":
         if args.correlate_predictors:
             create_correlation_results_plots(version, args.min_samples)
 
-    if not args.plot_only:
-        torch.save(rows, f"{RESULT_DIR}/minimal_pairs_scores.pt")
-
-    create_results_table()
+    create_results_table(args.versions)
