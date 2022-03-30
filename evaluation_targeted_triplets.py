@@ -4,6 +4,7 @@ import os
 from collections import Counter
 
 import torch
+import yaml
 from plotnine import ggplot, aes, geom_boxplot, ggsave, theme, element_text, xlab, geom_bar, ylab
 from scipy.stats import pearsonr
 
@@ -40,20 +41,9 @@ def evaluate(model):
 
     results_all = []
     for fragment_type in FRAGMENTS:
-        # row = dict(
-        #         fragment_type=fragment_type,
-        #         version=version,
-        #         hparams_path=f"lightning_logs/version_{version}/hparams.yaml"
-        # )
         for pos in POS_TAGS:
             per_sample_results = targeted_triplet_score(fragment_type, pos, model, trainer)
             print(f"Mean acc: {np.mean(per_sample_results)}")
-            # result_bootstrapped = list(get_bootstrapped_scores(per_sample_results))
-            # acc_mean, acc_std = np.mean(result_bootstrapped), np.std(result_bootstrapped)
-            # row.update({
-            #     f"targeted_triplet_{pos}_acc": acc_mean,
-            #     f"targeted_triplet_{pos}_acc_std": acc_std,
-            # })
 
             # Save per-sample results for detailed analysis
             results_data = get_eval_set_info(fragment_type, pos)
@@ -63,6 +53,7 @@ def evaluate(model):
                 f"eval set CSV file: ({len(results_data)})"
 
             results_data["result"] = per_sample_results
+            results_data["target_pos"] = pos
             results_all.append(results_data)
 
     results_all = pd.concat(results_all, ignore_index=True)
@@ -86,14 +77,8 @@ def targeted_triplet_score(fragment_type, pos, model, trainer):
 
 
 def get_all_results_df(version, pos_tags, per_word_results=False, min_samples=None):
-    results_data_all = []
-    for pos in pos_tags:
-        for fragment_type in FRAGMENTS:
-            results_data_fragment = pd.read_csv(f"{RESULT_DIR}/version_{version}/targeted_triplets_{fragment_type}_{pos}.csv",
-                                                converters={"tokenized": ast.literal_eval})
-            results_data_all.append(results_data_fragment)
-
-    results_data_all = pd.concat(results_data_all, ignore_index=True)
+    results_data_all = pd.read_csv(f"{RESULT_DIR}/version_{version}/minimal_pairs_scores.csv", converters={"tokenized": ast.literal_eval})
+    results_data_all = results_data_all[results_data_all.pos.isin(pos_tags)]
 
     if min_samples:
         counts = results_data_all.target_word.value_counts()
@@ -267,9 +252,13 @@ def get_word_concreteness(word, word_concreteness_ratings):
 
 def get_args():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--run", action="store_true", default=False,
+                        help="Run evaluation")
     parser.add_argument("--versions", type=str, nargs="+")
-    parser.add_argument("--plot-only", action="store_true", default=False,
-                        help="Only plot results, do not re-run evaluation")
+
+    parser.add_argument("--plot", action="store_true", default=False,
+                        help="Plot results")
+    parser.add_argument("--conditions", type=str, default="conditions.yaml")
 
     parser.add_argument(
         "--min-samples",
@@ -282,15 +271,29 @@ def get_args():
     return parser.parse_args()
 
 
-def create_results_table(versions):
+def create_results_table(versions, conditions_file):
+    conditions = yaml.safe_load(open(conditions_file))
+    for condition, versions in conditions.items():
+        for version in versions:
+            results_data_words_all = get_all_results_df(version, POS_TAGS)
+            result_bootstrapped = list(get_bootstrapped_scores(results_data_words_all.result.values))
+    # row = dict(
+    #         fragment_type=fragment_type,
+    #         version=version,
+    #         hparams_path=f"lightning_logs/version_{version}/hparams.yaml"
+    # )
+    # result_bootstrapped = list(get_bootstrapped_scores(per_sample_results))
+    # acc_mean, acc_std = np.mean(result_bootstrapped), np.std(result_bootstrapped)
+    # row.update({
+    #     f"targeted_triplet_{pos}_acc": acc_mean,
+    #     f"targeted_triplet_{pos}_acc_std": acc_std,
+    # })
     for version in versions:
         result_path = f"{RESULT_DIR}/version_{version}/minimal_pairs_scores.csv"
         pd.read_csv(result_path)
 
     data = add_condition(data)
     data = pd.DataFrame.from_records(data)
-    data['pretraining'] = pd.Categorical(data.apply(pretraining, axis=1),
-                                         categories=['None', 'V', 'A', 'AV'])
     data = data.fillna(dict(scrambled_video=False))
 
     for pos in POS_TAGS:
@@ -319,20 +322,19 @@ if __name__ == "__main__":
 
     os.makedirs(RESULT_DIR, exist_ok=True)
     for version in args.versions:
-        logging.info(f"Evaluating version {version}")
-
-        if not args.plot_only:
+        if args.run:
+            logging.info(f"Evaluating version {version}")
             net, path = load_best_model(f"lightning_logs/version_{version}/")
 
             result = evaluate(net)
             result_path = f"{RESULT_DIR}/version_{version}/minimal_pairs_scores.csv"
             os.makedirs(os.path.dirname(result_path), exist_ok=True)
-            result.to_csv(result_path)
+            result.to_csv(result_path, index=False)
 
-        get_average_result_bootstrapping(version)
-        create_per_word_result_plots(version, args.min_samples)
-        create_duration_results_plots(version)
-        if args.correlate_predictors:
-            create_correlation_results_plots(version, args.min_samples)
-
-    create_results_table(args.versions)
+        if args.plot:
+            create_per_word_result_plots(version, args.min_samples)
+            create_duration_results_plots(version)
+            if args.correlate_predictors:
+                create_correlation_results_plots(version, args.min_samples)
+    if args.plot:
+        create_results_table(args.versions, args.conditions)
