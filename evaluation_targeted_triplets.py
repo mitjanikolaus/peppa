@@ -10,7 +10,7 @@ from scipy.stats import pearsonr
 
 from generate_targeted_triplets_eval_sets import load_data, get_lemmatized_words, WORDS_NAMES, FRAGMENTS, POS_TAGS
 from pig.data import DEFAULT_SAMPLE_RATE
-from pig.evaluation import load_best_model, pretraining
+from pig.evaluation import load_best_model
 
 import pytorch_lightning as pl
 import logging
@@ -19,7 +19,6 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 
-from pig.evaluation import add_condition
 from pig.metrics import batch_triplet_accuracy
 
 import matplotlib.pyplot as plt
@@ -78,7 +77,7 @@ def targeted_triplet_score(fragment_type, pos, model, trainer):
 
 def get_all_results_df(version, pos_tags, per_word_results=False, min_samples=None):
     results_data_all = pd.read_csv(f"{RESULT_DIR}/version_{version}/minimal_pairs_scores.csv", converters={"tokenized": ast.literal_eval})
-    results_data_all = results_data_all[results_data_all.pos.isin(pos_tags)]
+    results_data_all = results_data_all[results_data_all.target_pos.isin(pos_tags)]
 
     if min_samples:
         counts = results_data_all.target_word.value_counts()
@@ -155,26 +154,27 @@ def get_average_result_bootstrapping(version):
     return mean_results, std_results
 
 
-def create_per_word_result_plots(version, min_samples):
-    for pos in POS_TAGS:
-        results_data_words = get_all_results_df(version, [pos], per_word_results=True, min_samples=min_samples)
-        if len(results_data_words) > 0:
-            results_boot = bootstrap_scores_for_column(results_data_words, "word")
+def create_per_word_result_plots(condition, versions, min_samples):
+    results_pos = {pos: [] for pos in POS_TAGS}
+    for version in versions:
+        for pos in POS_TAGS:
+            results_data_words = get_all_results_df(version, [pos], per_word_results=True, min_samples=min_samples)
+            if len(results_data_words) > 0:
+                results_bootstrapped = bootstrap_scores_for_column(results_data_words, "word")
+                results_pos[pos].append(results_bootstrapped)
 
+    for pos in ["NOUN", "VERB"]:
+        results_data_words = pd.concat(results_pos[pos], ignore_index=True)
+        if len(results_data_words) > 0:
             if pos == "NOUN":
                 figsize = (15, 6)
             else:
                 figsize  = (8, 6)
-            g = ggplot(results_boot, aes(x='reorder(word, score)', y="score")) + geom_boxplot() + xlab("") \
+            g = ggplot(results_data_words, aes(x='reorder(word, score)', y="score")) + geom_boxplot(outlier_shape='') + xlab("") \
                 + theme(axis_text_x=element_text(angle=85), figure_size=figsize)
-            ggsave(g, f"{RESULT_DIR}/version_{version}/acc_per_word_{pos}.pdf")
-
-            num_samples_per_word = results_data_words["word"].value_counts(ascending=True).index.tolist()
-            word_cat = pd.Categorical(results_data_words['word'], categories=num_samples_per_word)
-            results_data_words = results_data_words.assign(word_cat=word_cat)
-            g = ggplot(results_data_words) + geom_bar(aes(x='word_cat')) + xlab("") + ylab("# samples") + theme(
-                axis_text_x=element_text(angle=85), figure_size=figsize)
-            ggsave(g, f"{RESULT_DIR}/num_samples_per_word_{pos}.pdf")
+            path = f"{RESULT_DIR}/condition_{condition}/acc_per_word_{pos}.pdf"
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            ggsave(g, path)
 
 
 def create_correlation_results_plots(version, min_samples):
@@ -258,7 +258,7 @@ def get_args():
 
     parser.add_argument("--plot", action="store_true", default=False,
                         help="Plot results")
-    parser.add_argument("--conditions", type=str, default="conditions.yaml")
+    parser.add_argument("--conditions", type=str, default="conditions_minimal_pairs.yaml")
 
     parser.add_argument(
         "--min-samples",
@@ -271,45 +271,50 @@ def get_args():
     return parser.parse_args()
 
 
-def create_results_table(versions, conditions_file):
-    conditions = yaml.safe_load(open(conditions_file))
-    for condition, versions in conditions.items():
-        for version in versions:
-            results_data_words_all = get_all_results_df(version, POS_TAGS)
-            result_bootstrapped = list(get_bootstrapped_scores(results_data_words_all.result.values))
-    # row = dict(
-    #         fragment_type=fragment_type,
-    #         version=version,
-    #         hparams_path=f"lightning_logs/version_{version}/hparams.yaml"
-    # )
-    # result_bootstrapped = list(get_bootstrapped_scores(per_sample_results))
-    # acc_mean, acc_std = np.mean(result_bootstrapped), np.std(result_bootstrapped)
-    # row.update({
-    #     f"targeted_triplet_{pos}_acc": acc_mean,
-    #     f"targeted_triplet_{pos}_acc_std": acc_std,
-    # })
-    for version in versions:
-        result_path = f"{RESULT_DIR}/version_{version}/minimal_pairs_scores.csv"
-        pd.read_csv(result_path)
+def add_hparams(record):
+    config = yaml.safe_load(open(f"hparams_{record['condition']}.yaml"))
+    record['jitter'] = config['data']['train']['jitter']
+    record['static'] = config['video'].get('static', False)
+    record['audio_pretrained'] = config['audio']['pretrained']
+    record['video_pretrained'] = config['video']['pretrained']
+    record['resolution'] = 'x'.join(map(str, config['data']['target_size']))
+    record['freeze_wav2vec'] = config['audio']['freeze_feature_extractor'] \
+                               and config['audio']['freeze_encoder_layers'] == 12
+    record['sample_rate'] = str(config['data'].get('audio_sample_rate', DEFAULT_SAMPLE_RATE))
+    return record
 
-    data = add_condition(data)
+
+def create_results_table(conditions):
+    data = []
+    for condition, versions in conditions.items():
+        results_pos = {pos: [] for pos in POS_TAGS}
+        for version in versions:
+            for pos in POS_TAGS:
+                results_data_words_all = get_all_results_df(version, [pos])
+                results_bootstrapped = list(get_bootstrapped_scores(results_data_words_all.result.values))
+                results_pos[pos].extend(results_bootstrapped)
+
+        record = {"condition": condition}
+        for pos in POS_TAGS:
+            score = f"{np.mean(results_pos[pos]).round(2):.2f}" + "±" +f"{np.std(results_pos[pos]).round(2):.2f}"
+            record[f"minimal_pairs_score_{pos}"] = score
+
+        record = add_hparams(record)
+        data.append(record)
+
     data = pd.DataFrame.from_records(data)
     data = data.fillna(dict(scrambled_video=False))
 
-    for pos in POS_TAGS:
-        data[f"targeted_triplet_{pos}_result"] = data[f"targeted_triplet_{pos}_acc"].round(2).astype(str) + "±" + data[f"targeted_triplet_{pos}_acc_std"].round(3).astype(str)
-
     data["finetune_wav2vec"] = ~data["freeze_wav2vec"]
     data["temporal"] = ~data["static"]
-    data[['finetune_wav2vec', 'jitter', 'temporal', #'pretraining'
-          'targeted_triplet_NOUN_result', 'targeted_triplet_VERB_result']] \
+    data[['finetune_wav2vec', 'jitter', 'temporal',
+          'minimal_pairs_score_NOUN', 'minimal_pairs_score_VERB']] \
         .replace(True, "\checkmark").replace(False, "") \
         .rename(columns=dict(jitter='Jitt',
                              temporal='Tmp',
                              finetune_wav2vec="Finet",
-                             # pretraining='Pretraining',
-                             targeted_triplet_NOUN_result='Nouns',
-                             targeted_triplet_VERB_result='Verbs', )) \
+                             minimal_pairs_score_NOUN='Nouns',
+                             minimal_pairs_score_VERB='Verbs', )) \
         .to_latex(buf=f"{RESULT_DIR}/minimal_pairs.tex",
                   index=False,
                   escape=False,
@@ -321,8 +326,8 @@ if __name__ == "__main__":
     args = get_args()
 
     os.makedirs(RESULT_DIR, exist_ok=True)
-    for version in args.versions:
-        if args.run:
+    if args.run:
+        for version in args.versions:
             logging.info(f"Evaluating version {version}")
             net, path = load_best_model(f"lightning_logs/version_{version}/")
 
@@ -331,10 +336,8 @@ if __name__ == "__main__":
             os.makedirs(os.path.dirname(result_path), exist_ok=True)
             result.to_csv(result_path, index=False)
 
-        if args.plot:
-            create_per_word_result_plots(version, args.min_samples)
-            create_duration_results_plots(version)
-            if args.correlate_predictors:
-                create_correlation_results_plots(version, args.min_samples)
     if args.plot:
-        create_results_table(args.versions, args.conditions)
+        conditions = yaml.safe_load(open(args.conditions))
+        create_results_table(conditions)
+        for condition, versions in conditions.items():
+            create_per_word_result_plots(condition, versions, args.min_samples)
