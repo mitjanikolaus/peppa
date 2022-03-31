@@ -99,34 +99,32 @@ def get_all_results_df(version, pos_tags, per_word_results=False, min_samples=No
     return results_data_all
 
 
-def create_duration_results_plots(version):
-    results_data_all = get_all_results_df(version, POS_TAGS)
+def create_duration_results_plots(condition, versions):
+    results_data_duration = []
+    results_data_num_tokens = []
+    for version in versions:
+        results_data = get_all_results_df(version, POS_TAGS)
+        if len(results_data) > 0:
+            results_data["duration"] = pd.qcut(results_data["duration"], 3)
+            results_bootstrapped_duration = bootstrap_scores_for_column(results_data, "duration")
+            results_data["num_tokens"] = results_data.tokenized.apply(len)
+            results_data["num_tokens"] = pd.cut(results_data["num_tokens"], 3)
 
-    results_data_all["clipDuration"] = results_data_all["clipEnd"].astype(float) - results_data_all["clipStart"].astype(float)
-    results_data_all["clipDuration"] = pd.qcut(results_data_all["clipDuration"], 5)
+            results_bootstrapped_num_tokens = bootstrap_scores_for_column(results_data, "num_tokens")
 
-    results_data_all["num_tokens"] = results_data_all.tokenized.apply(len)
-    results_data_all["num_tokens"] = pd.cut(results_data_all["num_tokens"], 3)
+            results_data_duration.append(results_bootstrapped_duration)
+            results_data_num_tokens.append(results_bootstrapped_num_tokens)
 
-    g = ggplot(results_data_all) + geom_bar(aes(x='clipDuration')) + xlab("") + ylab("# samples") + theme(
+    results_data_duration = pd.concat(results_data_duration, ignore_index=True)
+    results_data_num_tokens = pd.concat(results_data_num_tokens, ignore_index=True)
+
+    g = ggplot(results_data_duration, aes(x="duration", y="score")) + geom_boxplot() + xlab("") + theme(
         axis_text_x=element_text(angle=85))
-    ggsave(g, f"{RESULT_DIR}/num_samples_per_duration.pdf")
+    ggsave(g, f"{RESULT_DIR}/condition_{condition}/acc_per_duration.pdf")
 
-    g = ggplot(results_data_all) + geom_bar(aes(x='num_tokens')) + xlab("") + ylab("# samples") + theme(
+    g = ggplot(results_data_num_tokens, aes(x="num_tokens", y="score")) + geom_boxplot() + xlab("") + theme(
         axis_text_x=element_text(angle=85))
-    ggsave(g, f"{RESULT_DIR}/num_samples_per_num_tokens.pdf")
-
-    results_boot = bootstrap_scores_for_column(results_data_all, "clipDuration")
-
-    g = ggplot(results_boot, aes(x="clipDuration", y="score")) + geom_boxplot() + xlab("") + theme(
-        axis_text_x=element_text(angle=85))
-    ggsave(g, f"{RESULT_DIR}/version_{version}/acc_per_duration.pdf")
-
-    results_boot = bootstrap_scores_for_column(results_data_all, "num_tokens")
-
-    g = ggplot(results_boot, aes(x="num_tokens", y="score")) + geom_boxplot() + xlab("") + theme(
-        axis_text_x=element_text(angle=85))
-    ggsave(g, f"{RESULT_DIR}/version_{version}/acc_per_num_tokens.pdf")
+    ggsave(g, f"{RESULT_DIR}/condition_{condition}/acc_per_num_tokens.pdf")
 
 
 def get_bootstrapped_scores(values, n_resamples=100):
@@ -341,3 +339,4 @@ if __name__ == "__main__":
         create_results_table(conditions)
         for condition, versions in conditions.items():
             create_per_word_result_plots(condition, versions, args.min_samples)
+            create_duration_results_plots(condition, versions)
